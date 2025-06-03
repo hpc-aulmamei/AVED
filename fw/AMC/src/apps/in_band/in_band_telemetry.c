@@ -624,6 +624,7 @@ static int iAmiCallback( EVL_SIGNAL *pxSignal )
                 PLL_DBG( IN_BAND_NAME, "PDI last packet      : 0x%x\r\n",   xDownloadRequest.iLastPacket );
                 PLL_DBG( IN_BAND_NAME, "PDI packet number    : 0x%hx\r\n",  xDownloadRequest.usPacketNum );
                 PLL_DBG( IN_BAND_NAME, "PDI packet size (KB) : 0x%hx\r\n",  xDownloadRequest.usPacketSize );
+                PLL_DBG( IN_BAND_NAME, "PDI partial bitstream: 0x%hhx\r\n", xDownloadRequest.usPartial );
 
                 if( TRUE == xDownloadRequest.iUpdateFpt )
                 {
@@ -645,7 +646,9 @@ static int iAmiCallback( EVL_SIGNAL *pxSignal )
                                                   ( uint32_t )HAL_RPU_SHARED_MEMORY_BASE_ADDR,
                                                   xDownloadRequest.ulLength,
                                                   xDownloadRequest.usPacketNum,
-                                                  xDownloadRequest.usPacketSize );
+                                                  xDownloadRequest.usPacketSize,
+                                                  xDownloadRequest.iLastPacket,
+                                                  xDownloadRequest.usPartial );
                 }
 
                 if( OK != iStatus )

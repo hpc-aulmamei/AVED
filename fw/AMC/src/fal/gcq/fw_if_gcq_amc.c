@@ -451,6 +451,7 @@ static uint32_t prvGCQClose( void *pvFWIf )
         */
         pxProfile->xState = FW_IF_GCQ_STATE_CLOSED;
         INC_STAT_COUNTER( FW_IF_GCQ_STATS_CLOSE_COUNT );
+        xGCQDeinit(pxProfile->pxGCQInstance);
     }
 
     return xRet;

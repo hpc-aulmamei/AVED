@@ -235,7 +235,8 @@ static int do_cmd_cfgmem_program(struct app_option *options, int num_args, char 
 					  image->arg,
 					  selected_boot_device,
 					  partition_number,
-					  progress_handler) == AMI_STATUS_OK) {
+					  progress_handler,
+					  false) == AMI_STATUS_OK) {
 			printf("\r\nImage programming complete.\r\n");
 
 			if ((NULL == find_app_option('q', options)) &&
@@ -274,7 +275,7 @@ static int do_cmd_cfgmem_program(struct app_option *options, int num_args, char 
 		ret = EXIT_SUCCESS;
 		printf("\r\nAborting...\r\n");
 	}
-
+	
 	ami_dev_delete(&dev);
 	return ret;
 }

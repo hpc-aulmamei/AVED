@@ -104,6 +104,13 @@ static void vGetFptHeader( void );
  */
  static void vGetFptPartition( void );
 
+/**
+ * @brief   Debug function to trigger a partial PDI reload
+ *
+ * @return  N/A
+ */
+ static void vTriggerPartial( void );
+
 /***** Helper functions *****/
 
 /**
@@ -152,6 +159,7 @@ void vAPC_DebugInit( DAL_HDL pxParentHandle )
                 pxDAL_NewDebugFunction( "set_copy_image",     pxSetDir, vSetCopyImage );
                 pxDAL_NewDebugFunction( "set_next_partition", pxSetDir, vSetNextPartition );
                 pxDAL_NewDebugFunction( "enable_hot_reset",   pxSetDir, vSetEnableHotReset );
+                pxDAL_NewDebugFunction( "trigger_partial",    pxSetDir, vTriggerPartial );
             }
             if( NULL != pxGetDir )
             {
@@ -213,6 +221,7 @@ static void vSetDownloadImage( void )
     uint32_t ulSrcAddr = 0;
     int iPacketNum     = 0; 
     int iPacketSize    = 0;
+    int iPartial       = 0;
     
     if( OK != iDAL_GetIntInRange( "Enter request instance:", &iInstance, 0, UTIL_MAX_UINT8 ) )
     {
@@ -242,21 +251,30 @@ static void vSetDownloadImage( void )
     {
         PLL_DAL( APC_DBG_NAME, "Error retrieving packet size\r\n" );
     }
-
     else
     {
         EVL_SIGNAL xSignal = { 0 };
         xSignal.ucInstance = iInstance;
-
+        if( iPartial == 1 )
+        {
+            iTriggerPartial();
+        }
         if( OK != iAPC_DownloadImage( &xSignal, ( APC_BOOT_DEVICES )xBootDevice, iPartition, ulSrcAddr, ( uint32_t )iImageSize, 
-                                      ( uint16_t )iPacketNum, ( uint16_t )iPacketSize ) )
+                                      ( uint16_t )iPacketNum, ( uint16_t )iPacketSize, 0, ( uint8_t )iPartial ) )
         {
             PLL_DAL( APC_DBG_NAME, "Error writing %d bytes to partition %d\r\n", iImageSize, iPartition );
         }
         else
         {
-            PLL_DAL( APC_DBG_NAME, "%d bytes written from 0x%08X to partition %d\r\n",
+            if( iPartial == 0 )
+            {
+                PLL_DAL( APC_DBG_NAME, "%d bytes written from 0x%08X to partition %d\r\n",
                      iImageSize, ulSrcAddr, iPartition );
+            }
+            else
+            {
+                PLL_DAL( APC_DBG_NAME, "Partial PDI starting\r\n");
+            }
         }
     }
 }
@@ -465,3 +483,13 @@ static int iTestCallback( EVL_SIGNAL *pxSignal )
     return iStatus;
 }
 
+/**
+ * @brief   Trigger a partial PDI reload
+ */
+static void vTriggerPartial( void ) {
+    if (OK == iTriggerPartial()) {
+        PLL_DAL( APC_DBG_NAME, "Partial PDI triggered\r\n");
+    } else {
+        PLL_DAL( APC_DBG_NAME, "Error triggering partial PDI\r\n");
+    }
+}

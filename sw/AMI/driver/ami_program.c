@@ -29,6 +29,7 @@
  * @boot_device: Target boot device.
  * @partition: Partition number to flash.
  * @efd_ctx: eventfd context for reporting progress (optional).
+ * @partial: Flag to indicate partial download.
  *
  * If `partition` is equal to `FPT_UPDATE_MAGIC` will update the FPT.
  *
@@ -71,7 +72,7 @@ static int do_image_download(struct amc_control_ctxt *amc_ctrl_ctxt, uint8_t *bu
 			bytes_to_write = (size - bytes_written);
 		else
 			bytes_to_write = (PDI_CHUNK_SIZE * PDI_CHUNK_MULTIPLIER);
-		
+
 		/*
 		 * Don't invalidate the boot tag if we're updating the FPT
 		 * or if there is only a single chunk.
@@ -153,23 +154,121 @@ static int do_image_download(struct amc_control_ctxt *amc_ctrl_ctxt, uint8_t *bu
 	return ret;
 }
 
+static int do_image_download_partial(struct amc_control_ctxt *amc_ctrl_ctxt, uint8_t *buf, uint32_t size,
+	uint8_t boot_device, uint32_t partition, struct eventfd_ctx *efd_ctx)
+{
+	int ret = SUCCESS;
+	uint16_t chunk = 0;
+	uint32_t bytes_written = 0;
+	uint32_t bytes_to_write = 0;
+	printk("Size: %d\n", size);
+	uint16_t num_chunks = (size + ((PDI_CHUNK_SIZE * PDI_CHUNK_MULTIPLIER) - 1)) /
+		(PDI_CHUNK_SIZE * PDI_CHUNK_MULTIPLIER);
+	printk("num_chunks = %d\n", num_chunks);
+	if (!size || !amc_ctrl_ctxt || !buf)
+		return -EINVAL;
+
+	AMI_VDBG(
+		amc_ctrl_ctxt,
+		"Attempting to download partial PDI with image size %d, num_chunks = %d", size, num_chunks
+	);
+
+	while (bytes_written < size) {
+
+		if ((PDI_CHUNK_SIZE * PDI_CHUNK_MULTIPLIER) > (size - bytes_written))
+			bytes_to_write = (size - bytes_written);
+		else
+			bytes_to_write = (PDI_CHUNK_SIZE * PDI_CHUNK_MULTIPLIER);
+
+		/*
+		* This will copy the bitstream buffer into shared memory and submit
+		* the GCQ command. Using `flags` to pass in partition and chunk numbers.
+		*/
+		ret = submit_gcq_command(amc_ctrl_ctxt, GCQ_SUBMIT_CMD_DOWNLOAD_PARTIAL_PDI,
+			MK_PDI_FLAGS(boot_device, partition, chunk, false),
+			&buf[bytes_written], bytes_to_write);
+
+		if (ret)
+			break;
+
+		if (efd_ctx)
+			eventfd_signal(efd_ctx, bytes_to_write);
+
+		AMI_VDBG(
+			amc_ctrl_ctxt,
+			"Done with chunk %d",
+			chunk
+		);
+		chunk++;
+		bytes_written += bytes_to_write;
+	}
+
+	chunk = 0;
+	bytes_written = 0;
+	bytes_to_write = 0;
+
+	while (bytes_written < size) {
+
+		if ((PDI_CHUNK_SIZE * PDI_CHUNK_MULTIPLIER) > (size - bytes_written))
+			bytes_to_write = (size - bytes_written);
+		else
+			bytes_to_write = (PDI_CHUNK_SIZE * PDI_CHUNK_MULTIPLIER);
+
+		/*
+		* This will copy the bitstream buffer into shared memory and submit
+		* the GCQ command. Using `flags` to pass in partition and chunk numbers.
+		*/
+		ret = submit_gcq_command(amc_ctrl_ctxt, GCQ_SUBMIT_CMD_DOWNLOAD_PARTIAL_PDI,
+			MK_PDI_FLAGS(boot_device, partition, chunk, (chunk == (num_chunks - 1))),
+			&buf[bytes_written], bytes_to_write);
+
+		if (ret)
+			break;
+
+		if (efd_ctx)
+			eventfd_signal(efd_ctx, bytes_to_write);
+
+		AMI_VDBG(
+			amc_ctrl_ctxt,
+			"Done with chunk %d",
+			chunk
+		);
+		chunk++;
+		bytes_written += bytes_to_write;
+	}
+
+	if (ret)
+		AMI_ERR(amc_ctrl_ctxt, "Failed to download partial PDI, ret code: %d", ret);
+
+	return ret;
+}
+
 /*
  * Download a PDI bitstream.
  */
 int download_pdi(struct amc_control_ctxt *amc_ctrl_ctxt, uint8_t *buf, uint32_t size,
-	uint8_t boot_device, uint32_t partition, struct eventfd_ctx *efd_ctx)
+	uint8_t boot_device, uint32_t partition, struct eventfd_ctx *efd_ctx, uint8_t partial)
 {
 	if (!amc_ctrl_ctxt || !size || !buf || (partition == FPT_UPDATE_MAGIC))
 		return -EINVAL;
-
-	return do_image_download(
-		amc_ctrl_ctxt,
-		buf,
-		size,
-		boot_device,
-		partition,
-		efd_ctx
-	);
+	if (!partial)
+		return do_image_download(
+			amc_ctrl_ctxt,
+			buf,
+			size,
+			boot_device,
+			partition,
+			efd_ctx
+		);
+	else
+		return do_image_download_partial(
+			amc_ctrl_ctxt,
+			buf,
+			size,
+			boot_device,
+			partition,
+			efd_ctx
+		);
 }
 
 /*

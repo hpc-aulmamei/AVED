@@ -108,11 +108,12 @@ close:
  * @boot_device: Target boot device.
  * @partition: Partition number to program.
  * @progress_handler: Progress handler callback (optional).
+ * @partial: Specify whether the PDI is partial or full.
  *
  * Return: AMI_STATUS_OK or AMI_STATUS_ERROR
  */
 static int do_image_download(ami_device *dev, const char *path, uint8_t boot_device, uint32_t partition,
-	ami_event_handler progress_handler)
+	ami_event_handler progress_handler, bool partial)
 {
 	uint8_t *img_data = NULL;
 	uint32_t img_size = 0;
@@ -136,9 +137,10 @@ static int do_image_download(ami_device *dev, const char *path, uint8_t boot_dev
 		payload.boot_device = boot_device;
 		payload.partition = partition;
 		payload.efd = AMI_INVALID_FD;
+		payload.partial = partial;
 
 		if (progress_handler) {
-			progress.bytes_to_write = img_size;
+			progress.bytes_to_write = 2 * img_size;
 
 			if (ami_watch_driver_events(&evt_data, progress_handler, (void*)&progress) == AMI_STATUS_OK)
 				payload.efd = evt_data.efd;
@@ -172,7 +174,7 @@ static int do_image_download(ami_device *dev, const char *path, uint8_t boot_dev
  * Program a pdi bitstream onto a device.
  */
 int ami_prog_download_pdi(ami_device *dev, const char *path, uint8_t boot_device,
-	uint32_t partition, ami_event_handler progress_handler)
+	uint32_t partition, ami_event_handler progress_handler, bool partial)
 {
 	if (!dev || !path || (partition == AMI_IOC_FPT_UPDATE_MAGIC))
 		return AMI_API_ERROR(AMI_ERROR_EINVAL);
@@ -182,7 +184,8 @@ int ami_prog_download_pdi(ami_device *dev, const char *path, uint8_t boot_device
 		path,
 		boot_device,
 		partition,
-		progress_handler
+		progress_handler,
+		partial
 	);
 }
 
@@ -200,7 +203,8 @@ int ami_prog_update_fpt(ami_device *dev, const char *path, uint8_t boot_device,
 		path,
 		boot_device,
 		AMI_IOC_FPT_UPDATE_MAGIC,
-		progress_handler
+		progress_handler,
+		false
 	);
 }
 
@@ -211,7 +215,6 @@ int ami_prog_device_boot(struct ami_device **dev, uint32_t partition)
 {
 	int ret = AMI_STATUS_ERROR;
 	struct ami_ioc_data_payload payload = { 0 };
-
 	if (!dev || !(*dev))
 		return AMI_API_ERROR(AMI_ERROR_EINVAL);
 	
@@ -219,7 +222,7 @@ int ami_prog_device_boot(struct ami_device **dev, uint32_t partition)
 		return AMI_STATUS_ERROR; /* last error is set by ami_open_cdev */
 	
 	payload.partition = partition;
-	
+	payload.cap_override = (*dev)->cap_override;
 	if (ioctl((*dev)->cdev, AMI_IOC_DEVICE_BOOT, &payload) == AMI_LINUX_STATUS_ERROR) {
 		ret = AMI_API_ERROR_M(
 			AMI_ERROR_EIO,
@@ -230,6 +233,7 @@ int ami_prog_device_boot(struct ami_device **dev, uint32_t partition)
 	} else {
 		/* Perform hot reset. This will update the device handle. */
 		ret = ami_dev_hot_reset(dev);
+		ret = AMI_STATUS_OK;
 	}
 
 	return ret;

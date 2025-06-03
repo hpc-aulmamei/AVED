@@ -66,11 +66,12 @@
  * @boot_device: Target boot device.
  * @partition: Partition number to flash.
  * @efd_ctx: eventfd context for reporting progress (optional).
+ * @partial: Flag to indicate whether the PDI is partial or full.
  * 
  * Return: 0 or negative error code.
  */
 int download_pdi(struct amc_control_ctxt *amc_ctrl_ctxt, uint8_t *buf, uint32_t size,
-	uint8_t boot_device, uint32_t partition, struct eventfd_ctx *efd_ctx);
+	uint8_t boot_device, uint32_t partition, struct eventfd_ctx *efd_ctx, uint8_t partial);
 
 /**
  * update_fpt() - Download a PDI containing an FPT onto a device.

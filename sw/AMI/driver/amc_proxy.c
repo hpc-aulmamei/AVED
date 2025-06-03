@@ -57,6 +57,7 @@ enum amc_proxy_cmd_opcode {
 	AMC_PROXY_CMD_OPCODE_PDI_DOWNLOAD      = 0xA,
 	AMC_PROXY_CMD_OPCODE_SENSOR            = 0xC,
         AMC_PROXY_CMD_OPCODE_PARTITION_COPY    = 0xD,
+        AMC_PROXY_CMD_OPCODE_PARTIAL_PDI_DOWNLOAD = 0xE,
 	AMC_PROXY_CMD_OPCODE_IDENTIFY          = 0x202,
 
 	/* Other commands to be added here */
@@ -983,7 +984,6 @@ int amc_proxy_request_identity(struct amc_proxy_cmd_struct *cmd)
 
         amc_ctxt = amc_proxy_find_matching_proxy_instance(cmd->cmd_fw_if_gcq);
         if (amc_ctxt && amc_ctxt->inst.initialised) {
-
                 struct amc_proxy_cmd_request request_cmd_entry = {{{{0}}}};
                 struct amc_proxy_cmd_request_hdr *request_hdr = NULL;
                 request_hdr = &(request_cmd_entry.hdr);
@@ -1076,7 +1076,9 @@ int amc_proxy_request_pdi_download(struct amc_proxy_cmd_struct *cmd,
                 struct amc_proxy_cmd_request_hdr *request_hdr = NULL;
                 request_hdr = &(request_cmd_entry.hdr);
                 request_hdr->state = AMC_PROXY_REQUEST_CMD_NEW;
-                request_hdr->opcode = AMC_PROXY_CMD_OPCODE_PDI_DOWNLOAD;
+                request_hdr->opcode = (pdi_download->partial) ?
+                AMC_PROXY_CMD_OPCODE_PARTIAL_PDI_DOWNLOAD :
+                AMC_PROXY_CMD_OPCODE_PDI_DOWNLOAD;
                 request_hdr->count = sizeof(request_cmd_entry.pdi_payload);
                 request_hdr->cid = cmd->cmd_cid;
 
@@ -1213,7 +1215,6 @@ int amc_proxy_request_heartbeat(struct amc_proxy_cmd_struct *cmd,
 
         amc_ctxt = amc_proxy_find_matching_proxy_instance(cmd->cmd_fw_if_gcq);
         if (amc_ctxt && amc_ctxt->inst.initialised) {
-
                 struct amc_proxy_cmd_request request_cmd_entry = {{{{0}}}};
                 struct amc_proxy_cmd_request_hdr *request_hdr = NULL;
                 request_hdr = &(request_cmd_entry.hdr);

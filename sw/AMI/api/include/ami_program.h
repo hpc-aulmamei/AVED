@@ -104,6 +104,7 @@ struct ami_pdi_progress {
  * @boot_device: Target boot device.
  * @partition: Partition number to flash to.
  * @progress_handler: An event handler to accept progress notifications.
+ * @partial: Specify whether the PDI is partial or full.
  *
  * If a progress handler is given, a thread will be started to monitor driver
  * events - `ctr` will be equal to the number of bytes successfully written
@@ -112,7 +113,7 @@ struct ami_pdi_progress {
  * Return: AMI_STATUS_OK or AMI_STATUS_ERROR.
  */
 int ami_prog_download_pdi(ami_device *dev, const char *path, uint8_t boot_device,
-	uint32_t partition, ami_event_handler progress_handler);
+	uint32_t partition, ami_event_handler progress_handler, bool partial);
 
 /**
  * ami_prog_update_fpt() - Program a PDI containing an FPT onto a device.

@@ -41,6 +41,9 @@ typedef enum APC_PROXY_DRIVER_EVENTS
     APC_PROXY_DRIVER_E_COPY_FAILED,
     APC_PROXY_DRIVER_E_PARTITION_SELECTED,
     APC_PROXY_DRIVER_E_PARTITION_SELECTION_FAILED,
+    APC_PROXY_DRIVER_E_PARTIAL_DOWNLOAD_STARTED,
+    APC_PROXY_DRIVER_E_PARTIAL_DOWNLOAD_COMPLETE,
+    APC_PROXY_DRIVER_E_PARTIAL_DOWNLOAD_FAILED,
 
     MAX_APC_PROXY_DRIVER_EVENTS
 
@@ -136,13 +139,14 @@ int iAPC_BindCallback( EVL_CALLBACK *pxCallback );
  * @param   ulImageSize  Size of image (in bytes)
  * @param   usPacketNum  Image packet number
  * @param   usPacketSize Size of image packet (in KB)
+ * @param   usPartial    Flag that indicates if this is a partial PDI
  *
  * @return  OK           Image downloaded successfully
  *          ERROR        Image not downloaded successfully
  * 
  */
 int iAPC_DownloadImage( EVL_SIGNAL *pxSignal, APC_BOOT_DEVICES xBootDevice, int iPartition, uint32_t ulSrcAddr,
-                        uint32_t ulImageSize, uint16_t usPacketNum, uint16_t usPacketSize );
+                        uint32_t ulImageSize, uint16_t usPacketNum, uint16_t usPacketSize, int usLastPacket, uint8_t usPartial );
 
 /**
  * @brief   Download an image with an FPT to a location in NV memory
@@ -253,5 +257,13 @@ int iAPC_ClearStatistics( void );
  *          ERROR           If not successful
  */
 int iAPC_GetState( MODULE_STATE *pxState );
+
+/**
+ * @brief   Trigger partial programming
+ *
+ * @return  OK              If successful
+ *          ERROR           If not successful
+ */
+int iTriggerPartial ();
 
 #endif

@@ -122,6 +122,12 @@ static int do_cmd_device_boot(struct app_option *options, int num_args, char **a
 
 	partition_number = (uint32_t)strtoul(partition->arg, NULL, 0);
 
+
+	if(ami_dev_request_access(dev) != AMI_STATUS_OK) {
+		APP_API_ERROR("could not request access to device");
+	}
+
+
 	printf("Will do a hot reset to boot into partition %d. This may take a minute...\r\n",
 		partition_number);
 	

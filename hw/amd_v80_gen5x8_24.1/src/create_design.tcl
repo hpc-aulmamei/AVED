@@ -44,6 +44,9 @@ proc do_aved_create_design { } {
   source "$src_dir/bd/create_bd_design.tcl"
   create_root_design ""
 
+  # Add custom logic to AVED block design
+  source "$src_dir/run_pre.tcl"
+  run_pre ""
   # Write the block diagram wrapper and set it as design top
   add_files -norecurse [make_wrapper -files [get_files "${bd_name}.bd"] -top]
   update_compile_order -fileset sources_1

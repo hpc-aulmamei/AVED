@@ -156,6 +156,7 @@ struct amc_proxy_pdi_download_request {
         uint16_t last_chunk;
         uint16_t chunk;
         uint16_t chunk_size;
+        bool partial;
 };
 
 /**

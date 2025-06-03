@@ -49,6 +49,7 @@ proc do_aved_build {} {
   if {[get_property PROGRESS [get_runs impl_1]] != "100%"} {
     common::send_msg_id {BUILD_HW-6} {ERROR} "Implementation failed"
   }
+  source "$src_dir/run_post.tcl"
 
   common::send_msg_id {BUILD_HW-8} {INFO} {Done!}
 }

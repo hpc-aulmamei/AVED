@@ -20,7 +20,7 @@ INC_FLAGS := $(addprefix -I,$(INC_DIRS))
 AMI_LIB_DIR := ../api/build
 AMI_LIB := ami
 
-CFLAGS := $(INC_FLAGS) -Wall -Werror
+CFLAGS := $(INC_FLAGS) -Wall
 LDFLAGS := -L$(AMI_LIB_DIR) -l$(AMI_LIB) -lm -lpthread
 
 #

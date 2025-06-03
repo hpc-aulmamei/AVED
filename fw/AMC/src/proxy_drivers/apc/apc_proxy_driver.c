@@ -18,6 +18,7 @@
 #include "osal.h"
 #include "apc_proxy_driver.h"
 #include "profile_hal.h"
+#include "profile_fal.h"
 
 /******************************************************************************/
 /* Defines                                                                    */
@@ -53,6 +54,22 @@
 #define APC_FPT_HDR_MAGIC_NUM ( 0x92F7A516 )
 #endif
 
+#define PDI_PARTIAL_ADDR 0x100000
+#define PDI_PARTIAL_ADDR_HIGH 0x00
+#define TIMEOUT_PDI_TRIGGER (4 * 1000)
+
+/* PDI Reload commands */
+#define PDI_RELOAD_CMD_ADDR 0xFF3F0A40
+#define PDI_RELOAD_CMD_DDR (PDI_RELOAD_CMD_ADDR + 4)
+#define PDI_RELOAD_ADDR_HIGH (PDI_RELOAD_CMD_ADDR + 8)
+#define PDI_RELOAD_ADDR_LOW (PDI_RELOAD_CMD_ADDR + 12)
+#define PDI_RELOAD_CMD_TRIGGER (0xFF360000)
+#define PDI_RELOAD_POLL_DONE (0xFF360004)
+
+/* PDI Reload values */
+#define PDI_LOAD 0x30701
+#define PDI_LOAD_DDR 0x0F
+#define IPI_RPU 0x02
 /* Stat & Error definitions */
 #define APC_PROXY_STATS( DO )                            \
 	DO( APC_PROXY_STATS_INIT_OVERALL_COMPLETE )      \
@@ -164,6 +181,7 @@ typedef enum
 	APC_MSG_TYPE_COPY_PDI,
 	APC_MSG_TYPE_PARTITION_SELECT,
 	APC_MSG_TYPE_ENABLE_HOT_RESET,
+	APC_MSG_TYPE_DOWNLOAD_PARTIAL_PDI,
 	MAX_APC_MSG_TYPE
 
 } APC_MSG_TYPES;
@@ -205,9 +223,8 @@ typedef struct APC_PRIVATE_DATA
 
 	uint32_t pulStats[ APC_PROXY_STATS_MAX ];
 	uint32_t pulErrors[ APC_PROXY_ERRORS_MAX ];
-
+	void* pvTimerHandle;
 	uint32_t ulLowerFirewall;
-
 } APC_PRIVATE_DATA;
 
 /**
@@ -353,6 +370,15 @@ static int iVerifyDownload( APC_MBOX_DOWNLOAD_IMAGE *pxImageData );
  */
 static int iRefreshFptData( APC_BOOT_DEVICES xBootDevice );
 
+/**
+ * @brief   Run partial bitstream
+ *
+ * @param   pxImageData Pointer to data regarding the image to download
+ *
+ * @return  OK if the image was successfully downloaded
+ *          ERROR if the image was not successfully downloaded
+ */
+static int iProgramPartial (APC_MBOX_DOWNLOAD_IMAGE *pxImageData);
 
 /******************************************************************************/
 /* Local variables                                                            */
@@ -391,9 +417,12 @@ static APC_PRIVATE_DATA xLocalData =
 	{
 		0
 	},                                                                     /* puErrors */
+	NULL,                                                                  /* pvTimerHandle */
 	LOWER_FIREWALL                                                         /* ulLowerFirewall */
 };
 static APC_PRIVATE_DATA *pxThis = &xLocalData;
+
+static void vTimerTriggerCb ( void *pvTimerHandle );
 
 
 /******************************************************************************/
@@ -428,6 +457,14 @@ int iAPC_Initialise( uint8_t ucProxyId,
 		/* used for primary boot device only */
 		pxThis->ulNextBootAddr = APC_MULTIBOOT_REAL( HAL_IO_READ32( HAL_APC_PMC_BOOT_REG ) );
 
+		/* initialise timer */
+		if (OSAL_ERRORS_NONE != iOSAL_Timer_Create( &pxThis->pvTimerHandle,
+													OSAL_TIMER_CONFIG_ONE_SHOT,
+													vTimerTriggerCb,
+													"pl_reload_timer"))
+		{
+			PLL_ERR( APC_NAME, "Error: iOSAL_Timer_Create failed\r\n");
+		}
 		/* initalise evl record*/
 		if( OK != iEVL_CreateRecord( &pxThis->pxEvlRecord ) )
 		{
@@ -598,7 +635,9 @@ int iAPC_DownloadImage( EVL_SIGNAL *pxSignal,
                         uint32_t ulSrcAddr,
                         uint32_t ulImageSize,
                         uint16_t usPacketNum,
-                        uint16_t usPacketSize )
+                        uint16_t usPacketSize,
+						int iLastPacket,
+						uint8_t  usPartial )
 {
 	int iStatus = ERROR;
 
@@ -616,7 +655,9 @@ int iAPC_DownloadImage( EVL_SIGNAL *pxSignal,
 			{
 				0
 			};
-			xMsg.eMsgType                        = APC_MSG_TYPE_DOWNLOAD_PDI;
+			xMsg.eMsgType                        = (usPartial) ?
+			APC_MSG_TYPE_DOWNLOAD_PARTIAL_PDI :
+			APC_MSG_TYPE_DOWNLOAD_PDI;
 			xMsg.ucRequestId                     = pxSignal->ucInstance;
 			xMsg.xDownloadImageData.xBootDevice  = xBootDevice;
 			xMsg.xDownloadImageData.iPartition   = iPartition;
@@ -625,6 +666,7 @@ int iAPC_DownloadImage( EVL_SIGNAL *pxSignal,
 			xMsg.xDownloadImageData.ulSrcAddr    = ulSrcAddr;
 			xMsg.xDownloadImageData.usPacketNum  = usPacketNum;
 			xMsg.xDownloadImageData.usPacketSize = usPacketSize;
+			xMsg.xDownloadImageData.iLastPacket  = iLastPacket;
 
 			if( OSAL_ERRORS_NONE == iOSAL_MBox_Post( pxThis->pvOsalMBoxHdl,
 			                                         ( void* )&xMsg,
@@ -1222,6 +1264,24 @@ static void vProxyDriverTask( void *pArg )
 			}
 			break;
 
+			case APC_MSG_TYPE_DOWNLOAD_PARTIAL_PDI:
+			{
+				xSignal.ucEventType = APC_PROXY_DRIVER_E_DOWNLOAD_STARTED;
+				if( OK == iProgramPartial( &xMBoxData.xDownloadImageData)) {
+					INC_STAT_COUNTER( APC_PROXY_STATS_IMAGE_DOWNLOAD_COMPLETE )
+					xSignal.ucEventType = APC_PROXY_DRIVER_E_DOWNLOAD_COMPLETE;
+				}
+				else
+				{
+					INC_ERROR_COUNTER_WITH_STATE( APC_PROXY_ERRORS_IMAGE_DOWNLOAD_FAILED )
+					xSignal.ucEventType = APC_PROXY_DRIVER_E_DOWNLOAD_FAILED;
+				}
+				if( OK != iEVL_RaiseEvent( pxThis->pxEvlRecord, &xSignal ) )
+				{
+					INC_ERROR_COUNTER_WITH_STATE( APC_PROXY_ERRORS_RAISE_EVENT_FAILED )
+				}
+			}
+			break;
 			default:
 			{
 				INC_ERROR_COUNTER_WITH_STATE( APC_PROXY_ERRORS_MBOX_PEND_FAILED )
@@ -1874,4 +1934,74 @@ static int iVerifyDownload( APC_MBOX_DOWNLOAD_IMAGE *pxImageData )
 	}
 
 	return iStatus;
+}
+
+/**
+ * @brief   Program FPGA with partial image
+ */
+uint8_t* rsvd_mem_partial_program = ( uint8_t* ) PDI_PARTIAL_ADDR; // base address for PDI download
+static int iProgramPartial (APC_MBOX_DOWNLOAD_IMAGE *pxImageData)
+{
+	uint32_t ulAddr = pxImageData->ulSrcAddr;
+	uint32_t ulImageSize = pxImageData->ulImageSize;
+	uint8_t usLast = pxImageData->iLastPacket;
+	uint16_t packetSize = pxImageData->usPacketSize;
+	uint16_t packetNum = pxImageData->usPacketNum;
+	uint8_t *pucPdiData = (uint8_t *)(uintptr_t)(pxImageData->ulSrcAddr);
+	HAL_FLUSH_CACHE_DATA( ( uintptr_t )( pxImageData->ulSrcAddr ), ulImageSize );
+	PLL_DBG(APC_NAME, "Source addr: 0x%x\n\r", ulAddr);
+	PLL_DBG(APC_NAME, "Image size: 0x%x\n\r", ulImageSize);
+	PLL_DBG(APC_NAME, "Last packet: %u\n\r", usLast);
+	PLL_DBG(APC_NAME, "Packet size: %u\n\r", packetSize);
+	PLL_DBG(APC_NAME, "Packet number: %u\n\r", packetNum);
+	uint32_t destAddr = pxImageData->usPacketNum * ( pxImageData->usPacketSize * APC_BASE_PACKET_SIZE );
+	PLL_DBG(APC_NAME, "Dest addr: 0x%x\n\r", destAddr);
+	if( NULL == pvOSAL_MemCpy(rsvd_mem_partial_program + destAddr, pucPdiData, ulImageSize) )
+	{
+		PLL_ERR(APC_NAME, "Error: MemCpy");
+		return ERROR;
+	}
+
+	if( usLast == 1 )
+	{
+		if( OSAL_ERRORS_NONE != iOSAL_Timer_Start( pxThis->pvTimerHandle, TIMEOUT_PDI_TRIGGER ) )
+		{
+			PLL_ERR(APC_NAME, "Error: Timer start");
+		}
+	}
+
+	return OK;
+}
+
+int iTriggerPartial ()
+{
+	if( OSAL_ERRORS_NONE != iOSAL_Mutex_Take( pxThis->pvOsalMutexHdl, OSAL_TIMEOUT_WAIT_FOREVER ) )
+	{
+		INC_ERROR_COUNTER_WITH_STATE( APC_PROXY_ERRORS_MUTEX_TAKE_FAILED )
+	}
+
+	xGcqIf.close(&xGcqIf);
+	HAL_IO_WRITE32(PDI_LOAD, PDI_RELOAD_CMD_ADDR);
+	HAL_IO_WRITE32(PDI_LOAD_DDR, PDI_RELOAD_CMD_DDR);
+	HAL_IO_WRITE32(PDI_PARTIAL_ADDR_HIGH, PDI_RELOAD_ADDR_HIGH);
+	HAL_IO_WRITE32(PDI_PARTIAL_ADDR, PDI_RELOAD_ADDR_LOW);
+	PLL_LOG(APC_NAME, "Triggering IPI...\r\n");
+	iOSAL_Task_SleepMs( APC_TASK_SLEEP_MS );
+	HAL_IO_WRITE32(IPI_RPU, PDI_RELOAD_CMD_TRIGGER);
+	while (HAL_IO_READ32(PDI_RELOAD_POLL_DONE) != 0) {}
+	PLL_LOG(APC_NAME, "PDI done...\r\n");
+	xGcqIf.open(&xGcqIf);
+	if( OSAL_ERRORS_NONE != iOSAL_Mutex_Release( pxThis->pvOsalMutexHdl ) )
+	{
+		INC_ERROR_COUNTER_WITH_STATE( APC_PROXY_ERRORS_MUTEX_RELEASE_FAILED )
+	}
+
+	return OK;
+}
+
+static void vTimerTriggerCb ( void *pvTimerHandle )
+{
+	iTriggerPartial();
+	iOSAL_Timer_Stop(pvTimerHandle);
+
 }

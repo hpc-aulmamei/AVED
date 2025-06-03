@@ -175,6 +175,7 @@ typedef enum AMI_CMD_OPCODE_REQ
     AMI_CMD_OPCODE_PDI_DOWNLOAD_REQ    = 0xA,
     AMI_CMD_OPCODE_SENSOR_REQ          = 0xC,
     AMI_CMD_OPCODE_PDI_COPY_REQ        = 0xD,
+    AMI_CMD_OPCODE_PARTIAL_PDI_DOWNLOAD_REQ = 0xE,
     AMI_CMD_OPCODE_IDENTIFY_REQ        = 0x202,
 
     MAX_AMI_CMD_OPCODE
@@ -392,6 +393,7 @@ typedef struct AMI_CMD_DATA_PAYLOAD
     uint16_t usPacketNum:15;
     uint16_t usPacketSize; /* packet size in KB */
     uint32_t ulPad;
+    uint8_t usPartial;
 
 } AMI_CMD_DATA_PAYLOAD;
 
@@ -558,8 +560,8 @@ static int iHandleDebugVerbosityRequest( AMI_CMD_REQUEST *pxCmdRequest );
 int iAMI_Initialise( uint8_t ucProxyId, FW_IF_CFG *pxFwIf, uint32_t ulFwIfPort,
                      uint32_t ulTaskPrio, uint32_t ulTaskStack )
 {
-    int iStatus = ERROR;
 
+    int iStatus = ERROR;
     if( ( UPPER_FIREWALL == pxThis->ulUpperFirewall ) &&
         ( LOWER_FIREWALL == pxThis->ulLowerFirewall ) &&
         ( FALSE == pxThis->iInitialised ) &&
@@ -996,10 +998,33 @@ int iAMI_GetPdiDownloadRequest( EVL_SIGNAL *pxSignal,
                              pxThis->xRxData[ ucIndex ].xDownloadRequest.iUpdateFpt;
                 pxDownloadRequest->iLastPacket =
                              pxThis->xRxData[ ucIndex ].xDownloadRequest.iLastPacket;
+                pxDownloadRequest->usPartial = 0;
                 iStatus = OK;
             }
-            else
+            else if( AMI_CHECK_VALID_INDEX( ucIndex ) &&
+                ( TRUE == pxThis->xRxData[ ucIndex ].ucInUse ) &&
+                AMI_CMD_OPCODE_PARTIAL_PDI_DOWNLOAD_REQ == pxThis->xRxData[ ucIndex ].xOpCode )
             {
+                pxDownloadRequest->iBootDevice =
+                            pxThis->xRxData[ ucIndex ].xDownloadRequest.iBootDevice;
+                pxDownloadRequest->ullAddress =
+                            pxThis->xRxData[ ucIndex ].xDownloadRequest.ullAddress;
+                pxDownloadRequest->ulLength =
+                            pxThis->xRxData[ ucIndex ].xDownloadRequest.ulLength;
+                pxDownloadRequest->ulPartitionSel =
+                            pxThis->xRxData[ ucIndex ].xDownloadRequest.ulPartitionSel;
+                pxDownloadRequest->usPacketNum =
+                            pxThis->xRxData[ ucIndex ].xDownloadRequest.usPacketNum;
+                pxDownloadRequest->usPacketSize =
+                            pxThis->xRxData[ ucIndex ].xDownloadRequest.usPacketSize;
+                pxDownloadRequest->iUpdateFpt =
+                             pxThis->xRxData[ ucIndex ].xDownloadRequest.iUpdateFpt;
+                pxDownloadRequest->iLastPacket =
+                             pxThis->xRxData[ ucIndex ].xDownloadRequest.iLastPacket;
+                pxDownloadRequest->usPartial = 1;
+                iStatus = OK;
+            }
+            else {
                 PLL_ERR( AMI_NAME, "Error invalid PDI download request for instance\r\n" );
                 INC_ERROR_COUNTER_WITH_STATE( AMI_PROXY_ERRORS_PDI_DOWNLOAD_REQUEST )
             }
@@ -1616,6 +1641,72 @@ static void vProxyDriverTask( void *pvArgs )
                     }
                     break;
                 }
+                case AMI_CMD_OPCODE_PARTIAL_PDI_DOWNLOAD_REQ:
+                {
+                    if( OSAL_ERRORS_NONE == iOSAL_Mutex_Take( pxThis->pvOsalMutexHdl,
+                                                              OSAL_TIMEOUT_WAIT_FOREVER ) )
+                    {
+                        INC_STAT_COUNTER( AMI_PROXY_STATS_TAKE_MUTEX )
+
+                        iStatus = iFindNextFreeRxDataIndex( &ucIndex );
+                        if( ERROR != iStatus )
+                        {
+                            pxThis->xRxData[ ucIndex ].usCid = xCmdRequest.xHdr.usCid;
+                            pxThis->xRxData[ ucIndex ].xOpCode = xCmdRequest.xHdr.ulOpCode;
+                            pxThis->xRxData[ ucIndex ].xDownloadRequest.iBootDevice =
+                                                                xCmdRequest.xPdiDownloadPayload.ulBootDevice;
+                            pxThis->xRxData[ ucIndex ].xDownloadRequest.ullAddress =
+                                                                xCmdRequest.xPdiDownloadPayload.ullAddress;
+                            pxThis->xRxData[ ucIndex ].xDownloadRequest.ulLength =
+                                                                xCmdRequest.xPdiDownloadPayload.ulSize;
+                            pxThis->xRxData[ ucIndex ].xDownloadRequest.ulPartitionSel =
+                                                                xCmdRequest.xPdiDownloadPayload.ulPartitionSel;
+                            pxThis->xRxData[ ucIndex ].xDownloadRequest.usPacketNum =
+                                                                xCmdRequest.xPdiDownloadPayload.usPacketNum;
+                            pxThis->xRxData[ ucIndex ].xDownloadRequest.usPacketSize =
+                                                                xCmdRequest.xPdiDownloadPayload.usPacketSize;
+                            pxThis->xRxData[ ucIndex ].xDownloadRequest.iUpdateFpt =
+                                                                xCmdRequest.xPdiDownloadPayload.ulUpdateFpt;
+                            pxThis->xRxData[ ucIndex ].xDownloadRequest.iLastPacket =
+                                                                xCmdRequest.xPdiDownloadPayload.usLastPacket;
+                            pxThis->xRxData[ ucIndex ].ucInUse = TRUE;
+                            pxThis->xRxData[ ucIndex ].xDownloadRequest.usPartial = 1;
+                        }
+                        else
+                        {
+                            INC_ERROR_COUNTER_WITH_STATE( AMI_PROXY_RX_DATA_INDEX_FAILED )
+                        }
+
+                        if( OSAL_ERRORS_NONE != iOSAL_Mutex_Release( pxThis->pvOsalMutexHdl ) )
+                        {
+                            INC_ERROR_COUNTER_WITH_STATE( AMI_PROXY_ERRORS_MUTEX_RELEASE_FAILED )
+                        }
+
+                        if( ERROR != iStatus )
+                        {
+                            INC_STAT_COUNTER( AMI_PROXY_STATS_RELEASE_MUTEX )
+
+                            /* Raise event using the index as the method to track the event */
+                            EVL_SIGNAL xNewSignal = { pxThis->ucMyId,
+                                                    AMI_PROXY_DRIVER_E_PDI_DOWNLOAD_START,
+                                                    ucIndex,
+                                                    0 };
+                            iStatus = iEVL_RaiseEvent( pxThis->pxEvlRecord, &xNewSignal );
+                            if( ERROR == iStatus )
+                            {
+                                PLL_ERR( AMI_NAME, "Error attempting to raise event 0x%x\r\n",
+                                         AMI_PROXY_DRIVER_E_PDI_DOWNLOAD_START );
+                                INC_ERROR_COUNTER_WITH_STATE( AMI_PROXY_RAISE_EVENT_PDI_DOWNLOAD_FAILED )
+                            }
+                        }
+                    }
+                    else
+                    {
+                        INC_ERROR_COUNTER_WITH_STATE( AMI_PROXY_ERRORS_MUTEX_TAKE_FAILED )
+                    }
+                    break;
+                }
+
                 case AMI_CMD_OPCODE_PDI_COPY_REQ:
                 {
                     if( OSAL_ERRORS_NONE == iOSAL_Mutex_Take( pxThis->pvOsalMutexHdl,

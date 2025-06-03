@@ -795,6 +795,9 @@ static enum amc_cmd_id get_cmd_command_id(enum gcq_submit_cmd_req cmd_req)
 		id = AMC_CMD_ID_DEBUG_VERBOSITY;
 		break;
 
+	case GCQ_SUBMIT_CMD_DOWNLOAD_PARTIAL_PDI:
+		id = AMC_CMD_ID_DOWNLOAD_PARTIAL_PDI;
+		break;
 	default:
 		id = AMC_CMD_ID_UNKNOWN;
 		break;
@@ -1222,6 +1225,7 @@ int submit_gcq_command(struct amc_control_ctxt	*amc_ctrl_ctxt,
 	switch (cmd_id) {
 	/* data_buf required */
 	case AMC_CMD_ID_DOWNLOAD_PDI:
+	case AMC_CMD_ID_DOWNLOAD_PARTIAL_PDI:
 	case AMC_CMD_ID_IDENTIFY:
 	case AMC_CMD_ID_SENSOR:
 	case AMC_CMD_ID_HEARTBEAT:
@@ -1306,6 +1310,34 @@ int submit_gcq_command(struct amc_control_ctxt	*amc_ctrl_ctxt,
 	break;
 
 	case AMC_CMD_ID_DOWNLOAD_PDI:
+	{
+		if (acquire_gcq_data(amc_ctrl_ctxt, (uint32_t *)&(payload_address), &length)) {
+			ret = -EIO;
+			goto done;
+		}
+
+		data_page_acquired = true;
+		payload_size = data_size;
+
+		AMI_VDBG(amc_ctrl_ctxt,
+			 "Payload size = %d, page length = %d",
+			 payload_size,
+			 length);
+		if (length < payload_size) {
+			AMI_WARN(amc_ctrl_ctxt,
+				 "Data request length is %d but allocated length is %d",
+				 payload_size,
+				 length);
+			payload_size = length;
+		}
+
+		/* Copy payload data to address */
+		memcpy_gcq_payload_to_device(amc_ctrl_ctxt, payload_address, data_buf, data_size);
+	}
+	break;
+
+	case AMC_CMD_ID_DOWNLOAD_PARTIAL_PDI:
+	/* Same as AMC_CMD_ID_DOWNLOAD_PDI. Handler changes so the change is seen in AMC */
 	{
 		if (acquire_gcq_data(amc_ctrl_ctxt, (uint32_t *)&(payload_address), &length)) {
 			ret = -EIO;
@@ -1475,6 +1507,31 @@ int submit_gcq_command(struct amc_control_ctxt	*amc_ctrl_ctxt,
 		pdi_download_request.length = payload_size;
 		pdi_download_request.address = payload_address;
 		pdi_download_request.boot_device = PDI_BOOT_DEVICE(flags);
+		pdi_download_request.partial = false;
+
+		/* Using the `flags` argument to select the partition. */
+		if (PDI_PARTITION(flags) != FPT_UPDATE_FLAG)
+			pdi_download_request.partition = PDI_PARTITION(flags);
+		else
+			pdi_download_request.partition = FPT_UPDATE_MAGIC;
+
+		pdi_download_request.last_chunk = PDI_CHUNK_IS_LAST(flags);
+		pdi_download_request.chunk = PDI_CHUNK(flags);
+		pdi_download_request.chunk_size = PDI_CHUNK_SIZE;
+		/* Set longer timeout for the PDI download */
+		amc_proxy_cmd->cmd_timeout_jiffies = jiffies + REQUEST_DOWNLOAD_TIMEOUT;
+		ret = amc_proxy_request_pdi_download(amc_proxy_cmd, &pdi_download_request);
+
+	}
+	break;
+
+	case AMC_CMD_ID_DOWNLOAD_PARTIAL_PDI:
+	{
+		struct amc_proxy_pdi_download_request pdi_download_request = { 0 };
+		pdi_download_request.length = payload_size;
+		pdi_download_request.address = payload_address;
+		pdi_download_request.boot_device = PDI_BOOT_DEVICE(flags);
+		pdi_download_request.partial = true;
 
 		/* Using the `flags` argument to select the partition. */
 		if (PDI_PARTITION(flags) != FPT_UPDATE_FLAG)
@@ -1674,6 +1731,9 @@ int submit_gcq_command(struct amc_control_ctxt	*amc_ctrl_ctxt,
 		ret = amc_proxy_get_response_debug_verbosity(amc_proxy_cmd);
 		break;
 
+	case AMC_CMD_ID_DOWNLOAD_PARTIAL_PDI:
+		ret = amc_proxy_get_response_pdi_download(amc_proxy_cmd);
+		break;
 	default:
 		AMI_ERR(amc_ctrl_ctxt, "Unsupported response %d", cmd_id);
 		break;

@@ -41,6 +41,7 @@
  * @cap_override: Bypass permission checks. This may not apply to all IOCTL's.
  * @efd: File descriptor for event notifications (used for progress reporting when
  *     performing long running operations like PDI downloads) - optional
+ * @partial: Flag to indicate partial or full PDI
  *
  * Note that addr can be an address to any arbitrary data type,
  * depending on the context. This struct is reused for the boot select
@@ -61,6 +62,7 @@ struct ami_ioc_data_payload {
 	uint32_t       dest_part;
 	bool           cap_override;
 	int            efd;
+	bool           partial;
 };
 
 /**
