@@ -40,9 +40,12 @@ proc do_aved_create_design { } {
   create_bd_design  ${bd_name}
   current_bd_design ${bd_name}
 
-  # Add base to block diagram
-  source "$src_dir/bd/create_bd_design.tcl"
-  create_root_design ""
+  # # Add base to block diagram
+  # source "$src_dir/bd/create_bd_design.tcl"
+  # create_root_design ""
+
+  source "$src_dir/bd/create_bw_test.tcl"
+  cr_bd_top ""
 
   # Write the block diagram wrapper and set it as design top
   add_files -norecurse [make_wrapper -files [get_files "${bd_name}.bd"] -top]
@@ -60,6 +63,7 @@ proc do_aved_create_design { } {
   set_property -dict { used_in_synthesis false    processing_order NORMAL } [get_files *impl.xdc]
   set_property -dict { used_in_synthesis false    processing_order NORMAL } [get_files *impl.pins.xdc]
 
+  set_property strategy Performance_ExtraTimingOpt                                        [get_runs impl_1]
   set_property STEPS.OPT_DESIGN.TCL.POST         [get_files *opt.post.tcl]                [get_runs impl_1]
   set_property STEPS.PLACE_DESIGN.TCL.PRE        [get_files *place.pre.tcl]               [get_runs impl_1]
   set_property STEPS.WRITE_DEVICE_IMAGE.TCL.PRE  [get_files *write_device_image.pre.tcl]  [get_runs impl_1]
