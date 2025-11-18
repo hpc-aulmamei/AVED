@@ -2332,6 +2332,7 @@ proc create_hier_cell_aved { parentCell nameHier } {
       CPM_PCIE1_PF2_BAR0_QDMA_64BIT {1} \
       CPM_PCIE1_PF2_BAR0_QDMA_SCALE {Megabytes} \
       CPM_PCIE1_PF2_BAR0_QDMA_SIZE {128} \
+      CPM_PCIE1_PF2_BAR0_QDMA_TYPE {AXI_Bridge_Master} \
       CPM_PCIE1_PF2_BASE_CLASS_VALUE {12} \
       CPM_PCIE1_PF2_CFG_DEV_ID {50b6} \
       CPM_PCIE1_PF2_CFG_SUBSYS_ID {000e} \
