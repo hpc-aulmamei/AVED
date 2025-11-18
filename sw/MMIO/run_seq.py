@@ -3,8 +3,8 @@ import mmap
 import struct
 import subprocess
 import time
+import argparse
 
-PCI_ADDR = "0000:1b:00.2"
 BAR_INDEX = 0
 BAR_SIZE = 128 * 1024 * 1024
 ITERATIONS = 1
@@ -36,6 +36,18 @@ REG_HBM_PTR_H   = 0x14
 
 LENGTH_BYTES = 512 * 1024 * 1024  # 512MB
 TIMEOUT = 100  # seconds
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="HBM bandwidth benchmark over PCIe BAR MMIO"
+    )
+    parser.add_argument(
+        "--pci-addr",
+        "-p",
+        default="0000:1b:00.2",
+        help="PCI address of the device (domain:bus:dev.func), e.g. 0000:1b:00.2",
+    )
+    return parser.parse_args()
 
 def read32(mem, offset):
     mem.seek(offset)
@@ -74,7 +86,7 @@ def wait_for_done(mem, core_index, timeout=TIMEOUT):
     print(f"[!] Timeout waiting for core {core_index}")
     return False
 
-def main():
+def main(PCI_ADDR: str):
     bar_path = f"/sys/bus/pci/devices/{PCI_ADDR}/resource{BAR_INDEX}"
     fd = os.open(bar_path, os.O_RDWR | os.O_SYNC)
     mem = mmap.mmap(fd, BAR_SIZE, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE)
@@ -116,4 +128,5 @@ def main():
     print(f"Sum of per-core throughputs: {total_throughput:.2f} GB/s")
     
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args.pci_addr)
