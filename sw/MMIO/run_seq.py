@@ -49,6 +49,9 @@ def parse_args():
     )
     return parser.parse_args()
 
+def setpci_enable_mem_busmaster(PCI_ADDR : str):
+    subprocess.run(["sudo", "setpci", "-s", PCI_ADDR, "COMMAND=0206"], check=True)
+
 def read32(mem, offset):
     mem.seek(offset)
     return struct.unpack("<I", mem.read(4))[0]
@@ -129,4 +132,5 @@ def main(PCI_ADDR: str):
     
 if __name__ == "__main__":
     args = parse_args()
+    setpci_enable_mem_busmaster(args.pci_addr)
     main(args.pci_addr)
